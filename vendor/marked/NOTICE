@@ -1,12 +1,15 @@
 marked 18.1.3, vendored as this repository's renderer and MODIFIED:
 marked.esm.js below carries literal-character guards spliced into its two tokenizer loops
-(10 edits + a declaration in the inline loop, 10 edits + a declaration in the block loop, and
-one helper function; 23 edits in all). The guards are necessary-condition tests on the first
-character of each anchored tokenizer rule, so the rendered HTML is unchanged -- all 720
-practice cases are byte-identical to unmodified marked's output. The list of edits, with
-before/after text and rationale, is in README.md at the repository root.
+(12 edits in the inline loop, one of them a helper function, 11 edits in the block loop, and
+12 further edits that cut per-token whole-document work and regexes that cannot match;
+35 edits in all). Each guard tests the first character the corresponding anchored tokenizer
+rule must start with, so it is a necessary condition and the HTML cannot change; the further
+edits are equally exact (a cheaper way to take the first line, a skipped no-op replace, a
+tighter necessary condition). All 720 practice cases are byte-identical to unmodified
+marked's output, and 20000 differentially fuzzed inputs diverge in 0 cases. The edits, with
+before/after text and rationale, are in README.md at the repository root.
 
-  package     marked@18.1.3 on npm (published 2026-11-02T18:00:32.810Z)
+  package     marked@18.1.3 on npm, the latest release when vendored (published 2026-11-02T18:00:32.810Z)
   tarball     https://registry.npmjs.org/marked/-/marked-18.1.3.tgz
               sha1 2b1f2aff274503e3ec053c412c6eb979bd7c8194
               integrity sha512-9ChMH8EVVgjgID49nsL6IWxWk5c6GtAsq/xw7U1ggkjkU5AGuv68oLTVlFRtvcUYZtpbNyjyvGo3YDu0fGapiw==
@@ -17,7 +20,7 @@ before/after text and rationale, is in README.md at the repository root.
 
   marked.esm.js   the package's lib/marked.esm.js, patched: literal-character tokenizer guards
                   upstream sha256 e76f3b37046a5d294159872002e5f6fcda8ed232e1be45ff76b3863f2919dae3
-                  patched  sha256 ad1adeee429a97455bd3412046366cfc27b1cc820b5b82c0ec98ed4dcedea499
+                  patched  sha256 b6c5bab700cf0b4688270388b03ddbbb70af67f1c026a64f6e35ac63d900c413
   LICENSE         the package's LICENSE, byte for byte (unmodified)
                   sha256 8e3a3f82f59a60958f56ca08f445647c32a4733dc7ca6c2c46f6eb898471ab9c
 

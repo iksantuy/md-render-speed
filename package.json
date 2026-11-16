@@ -1,3 +1,12 @@
 {
-  "type": "module"
+  "name": "markdown-render-speed-02-entry",
+  "version": "1.0.0",
+  "private": true,
+  "description": "parse(markdown) returning exactly what marked 18.1.3 renders with default options, faster: literal-character guards spliced into the vendored tokenizer loops.",
+  "type": "module",
+  "main": "parse.js",
+  "scripts": {
+    "start": "node main.ts"
+  },
+  "license": "MIT"
 }

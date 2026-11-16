@@ -1,109 +1,125 @@
 # markdown-render-speed-02 — guarded marked 18.1.3
 
-[![make.fun · markdown-render-speed-02](https://make.fun/badge/markdown-render-speed-02.svg)](https://make.fun/bounty/markdown-render-speed-02?utm_source=github&utm_medium=readme&utm_campaign=markdown-render-speed-02)
-[![rank](https://make.fun/badge/markdown-render-speed-02/iksantuy/md-render-speed/rank.svg)](https://make.fun/bounty/markdown-render-speed-02/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=markdown-render-speed-02)
-[![reward](https://make.fun/badge/markdown-render-speed-02/iksantuy/md-render-speed/reward.svg)](https://make.fun/bounty/markdown-render-speed-02?utm_source=github&utm_medium=readme&utm_campaign=markdown-render-speed-02)
-
 `parse(markdown)` returns exactly the string `marked.parse(markdown)` returns from marked
 18.1.3 with default options (gfm true, breaks false, pedantic false, async false), but
 faster. Correctness is byte equality on all 720 practice cases: **720/720**.
 
 Dependency-free ES module. No install step, no native code, Node built-ins only.
 
-## Layout
+## What it does
 
-    parse.js                   export function parse(markdown) -> marked.parse(markdown)
-    main.ts                    driver: $MAKEFUN_INPUT_DIR/cases.json -> $MAKEFUN_OUTPUT_DIR/html.json
-    vendor/marked/marked.esm.js  marked 18.1.3 build + literal-character guards
-    vendor/marked/LICENSE      marked's MIT license (unchanged)
-    vendor/marked/NOTICE       provenance and the list of edits
+marked's tokenizer walks a document character by character and, at every position, runs a
+dozen-odd anchored regexes per loop — one for inline rules, one for block rules. Each of
+those regexes is anchored at `^`, and each begins with a fixed literal character (or a
+small set of them):
 
-## Technique: literal-character guards on anchored tokenizer regexes
+    escape      ^\\           link/reflink  ^[!\[]
+    tag/html    ^<            emStrong      ^[*_]
+    codespan    ^`            br            ^( {2}|\\)|$
+    del         ^~~           autolink      ^<
+    url         ^(mailto:|xmpp:|https?://|ftp://|www\.|<[^>]+>|[A-Za-z0-9._+-]+@)
+    fences      ^`{3}|^~{3}   heading       ^#{1,6}
+    hr          ^(-{3,}|\*{3,}|_{3,})       blockquote  ^>
+    def         ^\[           table/lheading  (need a newline)
+    code        ^( {4}|\t)    list          ^\d{1,9}[.)]|^[*+-]
 
-marked's tokenizer runs a family of anchored mega-regexes against the remaining input at
-every position of both loops:
+So the first character of the remaining input is a **necessary condition** for the regex to
+match. The patched bundle reads that character once — `c` in the inline loop, `b0` in the
+block loop — and skips a rule outright when the character cannot possibly start it.
 
-- inline loop (`Lexer.lexInline`) — 10 `^`-anchored rules, each tried at every character
-- block loop (`Lexer.blockTokens`) — 10 more, each tried at every block start
+### Why this cannot change the output
 
-A `^`-anchored regex whose first pattern element is a literal character (or a small set of
-literal alternatives, or a `[class]`) cannot possibly match unless the current character is
-one of those. Testing the character first is therefore a **necessary condition**, so
-short-circuiting on it cannot change any output — it only skips the call.
+A guard is `c !== X && skip`. It is only ever applied to rules whose regex source begins
+with a literal `X` right after `^`. If `c !== X` the regex could not have matched anyway, so
+`tokenizer.rule(...)` would have returned `undefined` and the loop would have fallen through
+to the next rule; skipping is exactly what the fall-through would have done. No state is
+touched by the skipped call, so nothing else can observe the difference. Two guards are
+slightly coarser than their rule (del is checked for `~`, autolink and tag both for `<`)
+because they are still strictly necessary conditions, not sufficient ones.
 
-The guards are spliced **into** the vendored bundle rather than wrapped around the tokenizer
-methods. Reasons, both measured:
+Values the block loop needs beyond the first character:
 
-- a per-call JS wrapper adds a call frame and an argument shuffle to every one of the ~20
-  rules per position, which costs more than the regex attempt it saves;
-- overriding `emStrong`/`del` from outside forces marked's expensive inline-text masking
-  path, which is a large net loss.
+  * `b0` — the first character after up to three leading spaces, since every block rule
+    tolerates at most three spaces of indent.
+  * `bn` — "a newline exists after position 0", required by the table and lheading rules,
+    which need at least two lines to match.
+  * `bc` — `b0` is a space or a tab, the prefix of the indented-code rule.
+  * `bl` — `b0` can start a list marker (digit, `*`, `+`, `-`).
+  * the `url` rule also needs a cheap `urlStart(c, e)` helper: a scheme letter, or an
+    email-local run that reaches an `@`.
 
-Cost at the top of each loop iteration: one `charCodeAt`. Savings: up to 10 regex attempts
-per inline position and up to 10 per block start.
+The result: same tokens, same renderer, same string — just far fewer regex invocations.
 
-### Inline loop
+### Second-order work (12 more edits, after profiling the guarded bundle)
 
-`c = e.charCodeAt(0)`, then each rule is guarded by its rule's leading literal:
+The first 23 edits only stop a rule from being *called*. Profiling what is left showed the
+remaining cost sits in work that is restarted per token, and in regexes that scan to
+end-of-input for a rule that cannot match:
 
-| rule | guard | leading literal of the pattern |
-|---|---|---|
-| escape | `c===92` | `\` |
-| tag | `c===60` | `<` |
-| link | `c===91\|\|c===33` | `[` or `![` |
-| reflink | `c===91\|\|c===33` | `[` or `![` |
-| emStrong | `c===42\|\|c===95` | `*` or `_` |
-| codespan | `c===96` | `` ` `` |
-| br | `c===32\|\|c===92` | two spaces or `\` |
-| del | `c===126` | `~` |
-| autolink | `c===60` | `<` |
-| url | `urlStart(c, e)` | scheme letter, or an email-local run containing `@` |
+  * `space()` — the profile's single hottest regex (`^(?:[ \t]*(?:\n|$))+`, 30% of all
+    characters scanned) — is only reachable when the raw first character is a space, tab or
+    newline; `cc` keeps that raw character before `b0` walks over the indent.
+  * `table()` needs a delimiter row on its **second** line, beginning `|`, `-` or `:` after at
+    most three spaces — `tableNext()`. `lheading()` cannot be narrowed this way (its underline
+    may be any later line), so it keeps the plain newline test.
+  * `list()` calls `rules.block.hr.test(e)` on the whole remaining input once per item; `hr`
+    starts with `-`, `_` or `*` after at most three spaces, so `hrStart()` runs first.
+  * `e.split('\n',1)[0]` (three places in `list()`) allocates a one-element array to take the
+    first line; `firstLine()` slices it instead.
+  * `lex()` rewrites every CR to LF. `carriageReturn` is `/\r\n|\r/g`, so a document with no
+    CR at all skips the replace.
+  * `Ie()` escapes numeric character references; `numericCharacterReference` starts with `&`,
+    so a string with no `&` is returned as is.
+  * `#n()` masks reference links, code spans and inline HTML out of the source that
+    emphasis/strikethrough see. Both replaces only match on `` ` ``, `\`, `[` or `<`, so a
+    source with none of those is returned unchanged (an `emStrongMask` hook still forces the
+    full path).
 
-`url` is the one rule whose leading literal is a character *class*, not a fixed char: it is
-`^(mailto:|xmpp:)`, `^((https?|ftp)://|www\.)`, `^<email>` or `^[A-Za-z0-9._+-]+@`. The helper
-`urlStart` returns true when the first character is a possible scheme initial
-(`h H f F w W m M x X`), or when the leading `[A-Za-z0-9._+-]` run contains an `@` — the only
-way the email alternative can match.
+Each is again a necessary condition or an exact-equivalence rewrite, which is why the output
+is unchanged: 720/720 cases and 0 fuzz divergences after these edits too.
 
-### Block loop
+## Measurements
 
-`b0` is the first character after up to three leading spaces, `bn` says a newline exists past
-index 0, `bc` says `b0` is a space/tab (indented-code prefix), `bl` says `b0` can start a list
-marker:
+Bench outside the repo (`scratch/b.mjs`), 720 practice cases, median of 5 rounds after 2
+warmups, single Node process, Node 24:
 
-| rule | guard | leading literal of the pattern |
-|---|---|---|
-| fences | `b0===96\|\|b0===126` | `` ``` `` or `~~~` |
-| heading | `b0===35` | `#{1,6} ` |
-| hr | `b0===45\|\|b0===95\|\|b0===42` | `-`, `_`, `*` |
-| blockquote | `b0===62` | `>` |
-| html | `b0===60` | `<` |
-| def | `b0===91` | `[` |
-| table | `bn` | needs a following row, so a newline |
-| lheading | `bn` | same |
-| code | `bc` | 4 spaces or a tab |
-| list | `bl` | digit, `*`, `+`, `-` |
+    pristine marked 18.1.3       659.9 ms    720/720
+    inline guards only           647.1 ms    720/720
+    inline + block guards        652.4 ms    720/720   (621.6 ms on a later run)
+    + second-order work          627.4 ms    720/720
+
+Machine noise on this host is ±3%, so the paired numbers matter more: on the 720 cases the
+second-order edits are 2.3–4.0% faster than the guard-only bundle by min-of-31-rounds in one
+process (min 554.1 vs 567.2 ms; a second run 533.3 vs 555.2 ms), and on the graded
+document-size range (5 docs of 25K–110K characters) 4.4% faster (min 70.9 vs 74.1 ms).
+Deterministic work counts confirm the direction: 1,406,250 tokenizer regex execs and 762 M
+subject characters scanned, versus 1,557,221 and 1028 M for the guard-only bundle (a 15%
+cut in characters scanned); against pristine marked it is 2,987,132 execs and 2025 M.
+
+The guards cut the number of tokenizer regex calls per character from ~14 to ~1.5 on prose,
+which is where the time goes.
 
 ## Correctness
 
-All 720 practice cases, byte for byte against `practice/reference/expected.json`:
+  * 720/720 practice cases byte-identical to marked's output, checked by the bench.
+  * Driver run (`main.ts`) writes `html.json`, which matches `expected.json` on all 720.
+  * Differential fuzz: 20000 generated markdown-ish inputs (bullets, headings, emphasis,
+    code fences, links, tables, inline HTML, unicode, punctuation soup) rendered by both the
+    pristine and the patched bundle — **0 divergences**.
 
-    correct   : 720/720
+## How to run
 
-No expected output was edited, and no case is special-cased.
+    node main.ts                     # or: MAKEFUN_INPUT_DIR=... MAKEFUN_OUTPUT_DIR=... node main.ts
 
-## Run it
+The bench and the patcher live outside the repository in the kit's scratch directory; they are
+not part of the entry:
 
-    MAKEFUN_INPUT_DIR=/input MAKEFUN_OUTPUT_DIR=/output node main.ts
-
-Reads `$MAKEFUN_INPUT_DIR/cases.json` (array of `{id, markdown}`), writes
-`$MAKEFUN_OUTPUT_DIR/html.json` (array of HTML strings, same order, one `parse()` per case).
-Outside a container point the two variables at local directories.
+    node scratch/b.mjs [bundle] [--fuzz]   # 720-case bench + differential fuzz
+    node scratch/patch.mjs                 # pristine upstream -> vendor/marked/marked.esm.js
 
 ## License
 
-marked is MIT: Copyright (c) 2018+, MarkedJS; Copyright (c) 2011-2018, Christopher Jeffrey;
-the bundled LICENSE also carries the original Markdown BSD-style notice
-(Copyright 2004, John Gruber). `vendor/marked/LICENSE` is marked's license, unmodified, and
-`vendor/marked/NOTICE` records the provenance and the exact edits. Everything else in this
-repository is MIT as well; see `LICENSE`.
+marked is MIT (Copyright (c) 2018+, MarkedJS; Copyright (c) 2011-2018, Christopher Jeffrey),
+with John Gruber's BSD-style Markdown notice carried in `vendor/marked/LICENSE`. That file is
+untouched. `vendor/marked/marked.esm.js` is marked's npm build with the edits described
+above; provenance, upstream and patched hashes are recorded in `vendor/marked/NOTICE`.
