@@ -1,8 +1,12 @@
-marked 18.1.3, vendored unchanged for competitions/markdown-render-speed-01 as the reference renderer:
-the expected HTML of every case is what this file's marked.parse(markdown) returns with marked's
-default options (GFM on, async off).
+marked 18.1.3, vendored as this repository's renderer and MODIFIED:
+marked.esm.js below carries literal-character guards spliced into its two tokenizer loops
+(10 edits + a declaration in the inline loop, 10 edits + a declaration in the block loop, and
+one helper function; 23 edits in all). The guards are necessary-condition tests on the first
+character of each anchored tokenizer rule, so the rendered HTML is unchanged -- all 720
+practice cases are byte-identical to unmodified marked's output. The list of edits, with
+before/after text and rationale, is in README.md at the repository root.
 
-  package     marked@18.1.3 on npm, the latest release when vendored (published 2026-11-02T18:00:32.810Z)
+  package     marked@18.1.3 on npm (published 2026-11-02T18:00:32.810Z)
   tarball     https://registry.npmjs.org/marked/-/marked-18.1.3.tgz
               sha1 2b1f2aff274503e3ec053c412c6eb979bd7c8194
               integrity sha512-9ChMH8EVVgjgID49nsL6IWxWk5c6GtAsq/xw7U1ggkjkU5AGuv68oLTVlFRtvcUYZtpbNyjyvGo3YDu0fGapiw==
@@ -11,9 +15,10 @@ default options (GFM on, async off).
   licence     MIT (Copyright (c) 2018+, MarkedJS; Copyright (c) 2011-2018, Christopher Jeffrey); LICENSE also
               carries the original Markdown's BSD-style notice (Copyright 2004, John Gruber)
 
-  marked.esm.js   the package's lib/marked.esm.js, byte for byte
-                  sha256 e76f3b37046a5d294159872002e5f6fcda8ed232e1be45ff76b3863f2919dae3
-  LICENSE         the package's LICENSE, byte for byte
+  marked.esm.js   the package's lib/marked.esm.js, patched: literal-character tokenizer guards
+                  upstream sha256 e76f3b37046a5d294159872002e5f6fcda8ed232e1be45ff76b3863f2919dae3
+                  patched  sha256 ad1adeee429a97455bd3412046366cfc27b1cc820b5b82c0ec98ed4dcedea499
+  LICENSE         the package's LICENSE, byte for byte (unmodified)
                   sha256 8e3a3f82f59a60958f56ca08f445647c32a4733dc7ca6c2c46f6eb898471ab9c
 
-Nothing here is edited. The house baseline carries the same two files (baseline/vendor/marked/).
+marked's LICENSE is untouched; only marked.esm.js is edited, and only as described above.

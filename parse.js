@@ -1,7 +1,8 @@
 // The drop-in this competition races: parse(markdown) returns the HTML marked 18.1.3 renders with its
-// default options (GFM on, async off), vendor/marked/marked.esm.js being marked's npm build byte for
-// byte (MIT, vendor/marked/LICENSE). An entry's parse.js exports the same function, dependency-free,
-// and must return the same string for every input.
+// default options (GFM on, async off). Dependency-free: the renderer is the vendored marked build in
+// ./vendor/marked/marked.esm.js (MIT, vendor/marked/LICENSE), patched in place with literal-character
+// guards on the tokenizer's anchored mega-regexes (technique and rationale in README.md). The speed
+// lives in that vendored bundle, so this module stays a thin, allocation-free pass-through.
 
 import { marked } from './vendor/marked/marked.esm.js';
 
